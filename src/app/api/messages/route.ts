@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { auth } from '@/auth';
+import { sseManager } from '@/lib/sse';
 
 export async function GET(request: Request) {
     try {
@@ -88,6 +89,8 @@ export async function POST(request: Request) {
                 },
             },
         });
+
+        sseManager.broadcast(message);
 
         return NextResponse.json(message);
     } catch (error) {

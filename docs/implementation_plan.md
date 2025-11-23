@@ -57,3 +57,19 @@
 ### 手動検証
 - ユーザーがブラウザでアプリケーションを開けること。
 - レイアウトが正しく、レスポンシブであることを確認します。
+
+### リアルタイム機能 (Pusher)
+- **技術選定**: Pusher (Channels)
+    - 理由: サーバーレス環境（Vercel等）でも動作し、実装が容易で信頼性が高いため。
+- **必要なパッケージ**:
+    - `pusher`: サーバーサイド用
+    - `pusher-js`: クライアントサイド用
+- **環境変数**:
+    - `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER`
+- **バックエンド実装**:
+    - `src/lib/pusher.ts`: Pusherインスタンスの初期化。
+    - `POST /api/messages`: メッセージ保存後に `pusher.trigger` を呼び出し、イベントを発火。
+- **フロントエンド実装**:
+    - `src/app/page.tsx`: `useEffect` で Pusher チャンネルを購読 (`subscribe`)。
+    - イベント受信時にメッセージリストを更新。
+    - 重複表示防止のロジック実装。

@@ -11,6 +11,7 @@ type Message = {
   role: string;
   content: string;
   createdAt: string;
+  userId: string | null;
   user?: {
     name: string;
     avatar?: string | null;
@@ -134,6 +135,30 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    const eventSource = new EventSource('/api/events');
+
+    eventSource.onmessage = (event) => {
+      try {
+        const newMessage = JSON.parse(event.data);
+        // Check if message belongs to current conversation
+        if (currentConversation && newMessage.conversationId === currentConversation) {
+          setMessages((prev) => {
+            // Prevent duplicates
+            if (prev.some(m => m.id === newMessage.id)) return prev;
+            return [...prev, newMessage];
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse SSE message', e);
+      }
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [currentConversation]);
+
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -142,7 +167,17 @@ export default function Home() {
 
     // Optimistic update
     const tempId = Date.now().toString();
-    setMessages(prev => [...prev, { id: tempId, role: 'user', content: userMessage, createdAt: new Date().toISOString() }]);
+    setMessages(prev => [...prev, {
+      id: tempId,
+      role: 'user',
+      content: userMessage,
+      createdAt: new Date().toISOString(),
+      userId: session?.user?.id || null,
+      user: {
+        name: session?.user?.name || 'User',
+        avatar: session?.user?.image
+      }
+    }]);
 
     try {
       setIsLoading(true);
@@ -158,14 +193,21 @@ export default function Home() {
 
       if (res.ok) {
         const savedMessage = await res.json();
-        // Replace optimistic message with real one (simplified here by refetching or just updating)
-        // For now, we'll just fetch all to be safe and simple
-        if (currentConversation) {
-          fetchMessages(currentConversation);
-        }
+
+        setMessages(prev => {
+          // Check if the message already exists (via SSE)
+          if (prev.some(m => m.id === savedMessage.id)) {
+            // If it exists, remove the optimistic one
+            return prev.filter(m => m.id !== tempId);
+          }
+          // Otherwise, update the optimistic one
+          return prev.map(msg => msg.id === tempId ? savedMessage : msg);
+        });
       }
     } catch (error) {
       console.error('Failed to send message:', error);
+      // Revert optimistic update on error
+      setMessages(prev => prev.filter(msg => msg.id !== tempId));
     } finally {
       setIsLoading(false);
     }
@@ -317,25 +359,29 @@ export default function Home() {
               <p>No messages yet. Start a conversation!</p>
             </div>
           )}
+          {messages.map((msg) => {
+            const isOwnMessage = msg.userId === session?.user?.id;
+            const isAi = msg.role === 'ai';
 
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-4 max-w-3xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}>
-                {msg.role === 'user' ? (msg.user?.name?.[0]?.toUpperCase() || 'U') : 'AI'}
-              </div>
-              <div className={`space-y-1 ${msg.role === 'user' ? 'text-right' : ''}`}>
-                <div className={`flex items-center gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                  <span className="font-semibold text-sm">{msg.role === 'user' ? (msg.user?.name || 'User') : 'Antigravity AI'}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+            return (
+              <div key={msg.id} className={`flex gap-4 max-w-3xl mx-auto ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
+                <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${isOwnMessage ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}>
+                  {isAi ? 'AI' : (msg.user?.name?.[0]?.toUpperCase() || 'U')}
                 </div>
-                <div className={`inline-block text-sm text-left ${msg.role === 'user' ? 'bg-primary text-primary-foreground px-4 py-2 rounded-2xl rounded-tr-sm' : 'text-muted-foreground leading-relaxed'}`}>
-                  {msg.content}
+                <div className={`space-y-1 ${isOwnMessage ? 'text-right' : ''}`}>
+                  <div className={`flex items-center gap-2 ${isOwnMessage ? 'justify-end' : ''}`}>
+                    <span className="font-semibold text-sm">{isAi ? 'Antigravity AI' : (msg.user?.name || 'User')}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className={`inline-block text-sm text-left ${isOwnMessage ? 'bg-primary text-primary-foreground px-4 py-2 rounded-2xl rounded-tr-sm' : 'text-muted-foreground leading-relaxed bg-secondary/50 px-4 py-2 rounded-2xl rounded-tl-sm'}`}>
+                    {msg.content}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
